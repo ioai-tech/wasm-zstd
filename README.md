@@ -14,11 +14,14 @@ export interface InitOptions {
   module?: Record<string, unknown>;
 }
 
-export function init(options?: InitOptions): Promise<void>;
+export function init(options: InitOptions): Promise<void>;
 export function compressBound(size: number): number;
 export function compress(buffer: Uint8Array | ArrayBuffer | ArrayBufferView, compressionLevel?: number): Uint8Array;
 export function decompress(buffer: Uint8Array | ArrayBuffer | ArrayBufferView, size: number): Uint8Array;
 ```
+
+`init()` requires either `wasmUrl` or `wasmBinary`. The package does not rely on Emscripten's
+default `import.meta.url` wasm resolution, which breaks in Vite inline worker bundles.
 
 ## Usage with Vite
 
@@ -35,8 +38,29 @@ const compressed = compress(new TextEncoder().encode("hello zstd"), 3);
 const decompressed = decompress(compressed, "hello zstd".length);
 ```
 
-This pattern works in browser main-thread code, Web Workers, and Vite production builds because
-Vite owns the `.wasm` asset URL.
+This pattern works in browser main-thread code, dedicated Web Workers, and Vite production
+builds because Vite owns the `.wasm` asset URL.
+
+## Usage in inline workers (`?worker&inline`)
+
+Vite inline workers are loaded from `blob:` URLs, so sibling `.wasm` files cannot be resolved
+from `import.meta.url`. Fetch the wasm bytes on the main thread and pass them into the worker:
+
+```ts
+// main thread
+import wasmUrl from "@ioai/wasm-zstd/wasm-zstd.wasm?url";
+
+const wasmBinary = await fetch(wasmUrl).then((response) => response.arrayBuffer());
+const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+worker.postMessage({ wasmBinary }, [wasmBinary]);
+```
+
+```ts
+// worker.ts
+import { init } from "@ioai/wasm-zstd";
+
+await init({ wasmBinary });
+```
 
 ## Usage with custom loaders
 
@@ -54,9 +78,9 @@ await init({ wasmBinary });
 2. Run `npm run build` to invoke emcc inside Docker and compile `src/wasm-zstd.c` plus the vendored zstd sources.
 3. Run `npm test`.
 
-The generated package files are written to `dist/`.
+The generated package files are written to `dist/`. Emscripten glue is post-processed to remove
+`import.meta.url` wasm fallbacks that are incompatible with Vite worker bundling.
 
 ## License
 
 `@ioai/wasm-zstd` is licensed under the [MIT License](https://opensource.org/licenses/MIT).
-

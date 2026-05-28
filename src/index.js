@@ -1,5 +1,4 @@
-import createModule from "./wasm-zstd.js";
-
+let createModulePromise;
 let modulePromise;
 let moduleInstance;
 
@@ -16,28 +15,54 @@ function toUint8Array(value) {
   throw new TypeError("Expected a Uint8Array, ArrayBuffer, or ArrayBuffer view");
 }
 
+function resolveWasmUrl(wasmUrl) {
+  const resolved = String(wasmUrl);
+  if (typeof globalThis !== "undefined" && "location" in globalThis && globalThis.location?.href) {
+    try {
+      return new URL(resolved, globalThis.location.href).href;
+    } catch {
+      return resolved;
+    }
+  }
+  return resolved;
+}
+
 function normalizeInitOptions(options = {}) {
   const moduleOptions = { ...options.module };
 
   if (options.wasmBinary != undefined) {
     moduleOptions.wasmBinary = toUint8Array(options.wasmBinary);
-  }
-
-  if (options.wasmUrl != undefined) {
-    const wasmUrl = String(options.wasmUrl);
-    moduleOptions.locateFile = (path, prefix) => (path.endsWith(".wasm") ? wasmUrl : `${prefix}${path}`);
+    moduleOptions.locateFile ??= (path) => path;
+  } else if (options.wasmUrl != undefined) {
+    const wasmUrl = resolveWasmUrl(options.wasmUrl);
+    moduleOptions.locateFile = (path, prefix) =>
+      path.endsWith(".wasm") ? wasmUrl : `${prefix}${path}`;
   } else if (options.locateFile != undefined) {
     moduleOptions.locateFile = options.locateFile;
+  } else {
+    throw new Error(
+      "@ioai/wasm-zstd: init() requires wasmUrl or wasmBinary. " +
+        'In Vite: import wasmUrl from "@ioai/wasm-zstd/wasm-zstd.wasm?url"; await init({ wasmUrl });',
+    );
   }
 
   return moduleOptions;
+}
+
+async function loadCreateModule() {
+  createModulePromise ??= import("./wasm-zstd.js").then((mod) => mod.default);
+  return await createModulePromise;
 }
 
 export async function init(options = {}) {
   if (moduleInstance != undefined) {
     return;
   }
-  modulePromise ??= createModule(normalizeInitOptions(options)).then((mod) => {
+
+  const moduleOptions = normalizeInitOptions(options);
+  const createModule = await loadCreateModule();
+
+  modulePromise ??= createModule(moduleOptions).then((mod) => {
     moduleInstance = mod;
   });
   await modulePromise;

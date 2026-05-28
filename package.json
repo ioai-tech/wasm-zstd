@@ -1,6 +1,6 @@
 {
   "name": "@ioai/wasm-zstd",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Vite-friendly WebAssembly bindings for facebook/zstd",
   "type": "module",
   "main": "dist/index.js",
@@ -47,7 +47,7 @@
     "build:local": "./build.sh",
     "prepack": "npm run build",
     "test": "node test/index.js",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run --ignore-scripts"
   },
   "devDependencies": {
     "prettier": "^3.6.2"

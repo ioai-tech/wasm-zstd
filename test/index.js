@@ -10,6 +10,7 @@ const uncompressed = await readFile(join(testDir, "uncompressed.txt"));
 const wasmBinary = await readFile(join(testDir, "../dist/wasm-zstd.wasm"));
 
 assert.throws(() => decompress(compressed, uncompressed.byteLength));
+await assert.rejects(() => init(), /requires wasmUrl or wasmBinary/);
 
 await init({ wasmBinary });
 

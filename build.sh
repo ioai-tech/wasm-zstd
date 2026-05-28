@@ -44,3 +44,4 @@ emcc \
   -s "EXPORTED_FUNCTIONS=['_malloc', '_free']" `# index.js uses Module._malloc and Module._free`
 
 cp src/index.js dist/index.js
+node scripts/patch-emscripten-output.mjs
