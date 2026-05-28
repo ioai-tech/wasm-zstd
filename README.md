@@ -1,64 +1,62 @@
-# @foxglove/wasm-zstd
+# @ioai/wasm-zstd
 
-https://github.com/facebook/zstd compiled to WebAssembly and exposed as a high-level TypeScript/JavaScript API . PRs welcome!
+Vite-friendly WebAssembly bindings for [facebook/zstd](https://github.com/facebook/zstd).
 
 ## API
 
-`@foxglove/wasm-zstd` exports:
+`@ioai/wasm-zstd` exports:
 
 ```typescript
-export const isLoaded: Promise<boolean>;
-export function compressBound(size: number): number;
-export function compress(buffer: Uint8Array, compressionLevel?: number): Buffer;
-export function decompress(buffer: Uint8Array, size: number): Buffer;
-```
-
-Here is an example of compressing then decompressing with this library:
-
-```js
-import fs from "fs/promises";
-import zstd from "@foxglove/wasm-zstd";
-
-async function main() {
-  const inputData = await fs.readFile("input.txt");
-
-  // Wait for the wasm module to load
-  await zstd.isLoaded;
-
-  // Compress and save to a file with zstd compression level 3
-  const compressedBytes = zstd.compress(inputData, 3);
-  await fs.writeFile("compressed.zst", compressedBytes);
-
-  // Currently you need to know the size of the output buffer so the wasm runtime
-  // can allocate enough bytes to decompress into
-  const outputSize = inputData.byteLength;
-
-  // Decompress
-  const decompressedBytes = zstd.decompress(compressedBytes, inputData.byteLength);
-  assert(decompressedBytes.byteLength === inputData.byteLength);
+export interface InitOptions {
+  wasmUrl?: string | URL;
+  wasmBinary?: ArrayBuffer | ArrayBufferView;
+  locateFile?: (path: string, prefix: string) => string;
+  module?: Record<string, unknown>;
 }
+
+export function init(options?: InitOptions): Promise<void>;
+export function compressBound(size: number): number;
+export function compress(buffer: Uint8Array | ArrayBuffer | ArrayBufferView, compressionLevel?: number): Uint8Array;
+export function decompress(buffer: Uint8Array | ArrayBuffer | ArrayBufferView, size: number): Uint8Array;
 ```
 
-## Using the module in a browser
+## Usage with Vite
 
-Emscripten compiled WebAssembly modules are built in 2 parts: a `.js` side and a `.wasm` side. In the browser the `.js` side needs to download the `.wasm` side from the server so it can compile it. There is [more information available in the emscripten documentation](https://kripken.github.io/emscripten-site/docs/compiling/Deploying-Pages.html).
+Import the wasm binary as an explicit URL and initialize the module once before calling
+`compress` or `decompress`.
+
+```ts
+import { compress, decompress, init } from "@ioai/wasm-zstd";
+import wasmUrl from "@ioai/wasm-zstd/wasm-zstd.wasm?url";
+
+await init({ wasmUrl });
+
+const compressed = compress(new TextEncoder().encode("hello zstd"), 3);
+const decompressed = decompress(compressed, "hello zstd".length);
+```
+
+This pattern works in browser main-thread code, Web Workers, and Vite production builds because
+Vite owns the `.wasm` asset URL.
+
+## Usage with custom loaders
+
+If you already have the wasm bytes, pass them with `wasmBinary`:
+
+```ts
+import { init } from "@ioai/wasm-zstd";
+
+await init({ wasmBinary });
+```
 
 ## Developing locally
 
-1. Run `yarn install` to install dependencies.
-2. Run `yarn build` to invoke emcc inside a Docker container and compile the code in `wasm-zstd.c` as well as the required zstd source files. The output will be in `dist/` on the host machine.
-3. Run `yarn test` to run the tests.
+1. Run `npm install`.
+2. Run `npm run build` to invoke emcc inside Docker and compile `src/wasm-zstd.c` plus the vendored zstd sources.
+3. Run `npm test`.
+
+The generated package files are written to `dist/`.
 
 ## License
 
-@foxglove/wasm-zstd is licensed under the [MIT License](https://opensource.org/licenses/MIT).
+`@ioai/wasm-zstd` is licensed under the [MIT License](https://opensource.org/licenses/MIT).
 
-## Releasing
-
-1. Run `yarn version --[major|minor|patch]` to bump version
-2. Run `git push && git push --tags` to push new tag
-3. GitHub Actions will take care of the rest
-
-## Stay in touch
-
-Join our [Slack channel](https://foxglove.dev/slack) to ask questions, share feedback, and stay up to date on what our team is working on.

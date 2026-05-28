@@ -1,87 +1,55 @@
-process.env.NODE_ENV = "test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { compress, decompress, getModuleForTesting, init } from "../dist/index.js";
 
-const fs = require("fs");
-const assert = require("assert");
+const testDir = dirname(fileURLToPath(import.meta.url));
+const compressed = await readFile(join(testDir, "compressed.zstd"));
+const uncompressed = await readFile(join(testDir, "uncompressed.txt"));
+const wasmBinary = await readFile(join(testDir, "../dist/wasm-zstd.wasm"));
 
-const zstd = require("../");
-const compressed = fs.readFileSync(`${__dirname}/compressed.zstd`);
-const uncompressed = fs.readFileSync(`${__dirname}/uncompressed.txt`);
+assert.throws(() => decompress(compressed, uncompressed.byteLength));
 
-// note: we cannot put this within a mocha test
-// because wasm compiles faster than mocha starts the first test
-assert.throws(() => {
-  zstd.decompress(compressed, uncompressed.byteLength);
-});
+await init({ wasmBinary });
 
-describe("decompress", () => {
-  it("waits until module is ready", done => {
-    zstd.isLoaded.then(done);
-  });
+{
+  const result = decompress(compressed, uncompressed.byteLength);
+  assert.equal(result.byteLength, uncompressed.byteLength);
+  assert.deepEqual(result, new Uint8Array(uncompressed));
+}
 
-  it("decompresses accurately", () => {
-    const result = zstd.decompress(compressed, uncompressed.byteLength);
-    assert(result.byteLength === uncompressed.byteLength);
-    for (var i = 0; i < result.byteLength; i++) {
-      assert(result[i] === uncompressed[i]);
-    }
-  });
+{
+  const originalHeapSize = getModuleForTesting().HEAP8.buffer.byteLength;
+  for (let i = 0; i < 10000; i++) {
+    decompress(compressed, uncompressed.byteLength);
+  }
+  const newHeapSize = getModuleForTesting().HEAP8.buffer.byteLength;
+  assert.equal(originalHeapSize, newHeapSize);
+}
 
-  it("does not grow the heap after multiple decompression calls", () => {
-    const originalHeapSize = zstd.__module.HEAP8.buffer.byteLength;
-    for (var i = 0; i < 10000; i++) {
-      zstd.decompress(compressed, uncompressed.byteLength);
-    }
-    const newHeapSize = zstd.__module.HEAP8.buffer.byteLength;
-    assert(originalHeapSize === newHeapSize);
-  });
+{
+  const result = decompress(compressed, uncompressed.byteLength + 100);
+  assert.equal(result.byteLength, uncompressed.byteLength);
+  assert.deepEqual(result, new Uint8Array(uncompressed));
+}
 
-  it("can decompress into a space greater than uncompressed byte length", () => {
-    const result = zstd.decompress(compressed, uncompressed.byteLength + 100);
-    assert(result.byteLength === uncompressed.byteLength);
-    for (var i = 0; i < result.byteLength; i++) {
-      assert(result[i] === uncompressed[i]);
-    }
-  });
+assert.throws(() => decompress(compressed, uncompressed.byteLength - 100));
+assert.throws(() => decompress(new Uint8Array(10).fill(1), 100));
 
-  it("throws when decompressing into too small of a result buffer", () => {
-    assert.throws(() => {
-      const result = zstd.decompress(compressed, uncompressed.byteLength - 100);
-    });
-  });
+{
+  const result = compress(uncompressed);
+  assert(result.byteLength < uncompressed.byteLength);
+  const decompressed = decompress(result, uncompressed.byteLength);
+  assert.deepEqual(decompressed, new Uint8Array(uncompressed));
+}
 
-  it("throws an error if decompressing invalid buffer", () => {
-    assert.throws(() => {
-      const result = zstd.decompress(Buffer.alloc(10, 1), 100);
-    });
-  });
-});
+{
+  const result3 = compress(uncompressed);
+  const result19 = compress(uncompressed, 19);
+  assert(result19.byteLength < result3.byteLength);
+  const decompressed = decompress(result19, uncompressed.byteLength);
+  assert.deepEqual(decompressed, new Uint8Array(uncompressed));
+}
 
-describe("compress", () => {
-  it("waits until module is ready", done => {
-    zstd.isLoaded.then(done);
-  });
-
-  it("compresses accurately", () => {
-    const result = zstd.compress(uncompressed);
-    assert(result.byteLength < uncompressed.byteLength);
-
-    const decompressed = zstd.decompress(result, uncompressed.byteLength);
-    assert(decompressed.byteLength === uncompressed.byteLength);
-    for (var i = 0; i < decompressed.byteLength; i++) {
-      assert(decompressed[i] === uncompressed[i]);
-    }
-  });
-
-  it("can use a higher compression level", () => {
-    const result3 = zstd.compress(uncompressed);
-    const result19 = zstd.compress(uncompressed, 19);
-
-    assert(result19.byteLength < result3.byteLength);
-
-    const decompressed = zstd.decompress(result19, uncompressed.byteLength);
-    assert(decompressed.byteLength === uncompressed.byteLength);
-    for (var i = 0; i < decompressed.byteLength; i++) {
-      assert(decompressed[i] === uncompressed[i]);
-    }
-  });
-});
+console.log("wasm-zstd tests passed");

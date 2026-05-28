@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p dist
 
 emcc \
   vendor/zstd/lib/common/debug.c \
@@ -29,8 +32,9 @@ emcc \
   -o dist/wasm-zstd.js src/wasm-zstd.c `# this runs emscripten on the code in wasm-zstd.c` \
   -O3 `# compile with all optimizations enabled` \
   -s WASM=1 `# compile to .wasm instead of asm.js` \
-  --pre-js pre.js `# include pre.js at the top of wasm-zstd.js` \
-  -s MODULARIZE=1 `# include module boilerplate for better node/webpack interop` \
+  -s MODULARIZE=1 `# expose a module factory instead of mutating globals` \
+  -s EXPORT_ES6=1 `# emit an ES module that Vite can bundle` \
+  -s ENVIRONMENT=web,worker `# avoid Node-only fs/path/require branches in browser builds` \
   -s NO_EXIT_RUNTIME=1 `# keep the process around after main exits` \
   -s TOTAL_STACK=1048576 `# use a 1MB stack size instead of the default 5MB` \
   -s INITIAL_MEMORY=2097152 `# start with a 2MB allocation instead of 16MB, we will dynamically grow` \

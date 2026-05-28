@@ -1,111 +1,105 @@
-const ModuleFactory = require("./wasm-zstd");
-const ModulePromise = ModuleFactory();
+import createModule from "./wasm-zstd.js";
 
-let Module;
+let modulePromise;
+let moduleInstance;
 
-function ensureLoaded() {
-  if (!Module) {
-    throw new Error(
-      `wasm-zstd has not finished loading. Please wait with "await isLoaded" before calling any methods`
-    );
+function toUint8Array(value) {
+  if (value instanceof Uint8Array) {
+    return value;
   }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  throw new TypeError("Expected a Uint8Array, ArrayBuffer, or ArrayBuffer view");
 }
 
-function compressBound(srcSize) {
-  ensureLoaded();
-  return Module._compressBound(srcSize);
+function normalizeInitOptions(options = {}) {
+  const moduleOptions = { ...options.module };
+
+  if (options.wasmBinary != undefined) {
+    moduleOptions.wasmBinary = toUint8Array(options.wasmBinary);
+  }
+
+  if (options.wasmUrl != undefined) {
+    const wasmUrl = String(options.wasmUrl);
+    moduleOptions.locateFile = (path, prefix) => (path.endsWith(".wasm") ? wasmUrl : `${prefix}${path}`);
+  } else if (options.locateFile != undefined) {
+    moduleOptions.locateFile = options.locateFile;
+  }
+
+  return moduleOptions;
 }
 
-function compress(src, compressionLevel) {
-  ensureLoaded();
-  const srcSize = src.byteLength;
+export async function init(options = {}) {
+  if (moduleInstance != undefined) {
+    return;
+  }
+  modulePromise ??= createModule(normalizeInitOptions(options)).then((mod) => {
+    moduleInstance = mod;
+  });
+  await modulePromise;
+}
+
+function getModule() {
+  if (moduleInstance == undefined) {
+    throw new Error("wasm-zstd has not been initialized. Call and await init() before using it.");
+  }
+  return moduleInstance;
+}
+
+export function compressBound(srcSize) {
+  return getModule()._compressBound(srcSize);
+}
+
+export function compress(src, compressionLevel = 3) {
+  const module = getModule();
+  const input = toUint8Array(src);
+  const srcSize = input.byteLength;
   const destSize = compressBound(srcSize);
 
-  const srcPointer = Module._malloc(srcSize);
-  const destPointer = Module._malloc(destSize);
-
-  // set a default compression level if none is provided
-  if (compressionLevel == undefined) {
-    compressionLevel = 3;
-  }
-
-  // create a view into the heap for our source buffer
-  const uncompressedHeap = new Uint8Array(Module.HEAPU8.buffer, srcPointer, srcSize);
-  // copy source buffer into the heap
-  uncompressedHeap.set(src);
-
-  // call the C function to compress the frame
-  const resultSize = Module._compress(destPointer, destSize, srcPointer, srcSize, compressionLevel);
+  const srcPointer = module._malloc(srcSize);
+  const destPointer = module._malloc(destSize);
 
   try {
+    new Uint8Array(module.HEAPU8.buffer, srcPointer, srcSize).set(input);
+    const resultSize = module._compress(destPointer, destSize, srcPointer, srcSize, compressionLevel);
     if (resultSize === -1) {
-      throw new Error("Error during compression");
+      throw new Error("zstd compression failed");
     }
-
-    // copy destination buffer out of the heap back into js land
-    const output = Buffer.allocUnsafe(resultSize);
-    Buffer.from(Module.HEAPU8.buffer).copy(output, 0, destPointer, destPointer + resultSize);
-    return output;
+    return module.HEAPU8.slice(destPointer, destPointer + resultSize);
   } finally {
-    // free the source buffer memory
-    Module._free(srcPointer);
-    // free destination buffer on the heap
-    Module._free(destPointer);
+    module._free(srcPointer);
+    module._free(destPointer);
   }
 }
 
-function decompress(src, destSize) {
-  ensureLoaded();
-  const srcSize = src.byteLength;
+export function decompress(src, destSize) {
+  const module = getModule();
+  const input = toUint8Array(src);
+  const outputSize = Number(destSize);
+  if (!Number.isFinite(outputSize) || outputSize < 0) {
+    throw new RangeError("Expected destSize to be a non-negative finite number");
+  }
 
-  const srcPointer = Module._malloc(srcSize);
-  const destPointer = Module._malloc(destSize);
-
-  // create a view into the heap for our source buffer
-  const compressedHeap = new Uint8Array(Module.HEAPU8.buffer, srcPointer, srcSize);
-  // copy source buffer into the heap
-  compressedHeap.set(src);
-
-  // call the C function to decompress the frame
-  const resultSize = Module._decompress(destPointer, destSize, srcPointer, srcSize);
+  const srcPointer = module._malloc(input.byteLength);
+  const destPointer = module._malloc(outputSize);
 
   try {
+    new Uint8Array(module.HEAPU8.buffer, srcPointer, input.byteLength).set(input);
+    const resultSize = module._decompress(destPointer, outputSize, srcPointer, input.byteLength);
     if (resultSize === -1) {
-      throw new Error("Error during decompression");
+      throw new Error("zstd decompression failed");
     }
-
-    // copy destination buffer out of the heap back into js land
-    const output = Buffer.allocUnsafe(resultSize);
-    Buffer.from(Module.HEAPU8.buffer).copy(output, 0, destPointer, destPointer + resultSize);
-    return output;
+    return module.HEAPU8.slice(destPointer, destPointer + resultSize);
   } finally {
-    // free the source buffer memory
-    Module._free(srcPointer);
-    // free destination buffer on the heap
-    Module._free(destPointer);
+    module._free(srcPointer);
+    module._free(destPointer);
   }
 }
 
-// export a promise a consumer can listen to to wait
-// for the module to finish loading
-// module loading is async and can take
-// several hundred milliseconds...accessing the module
-// before it is loaded will throw an error
-const isLoaded = ModulePromise.then((mod) => mod["ready"].then(() => {}));
-
-module.exports = {
-  compressBound,
-  compress,
-  decompress,
-  isLoaded,
-};
-
-// Wait for the promise returned from ModuleFactory to resolve
-ModulePromise.then((mod) => {
-  Module = mod;
-
-  // export the Module object for testing purposes _only_
-  if (typeof process === "object" && process.env.NODE_ENV === "test") {
-    module.exports.__module = Module;
-  }
-});
+export function getModuleForTesting() {
+  return getModule();
+}
