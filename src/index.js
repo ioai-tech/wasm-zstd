@@ -1,4 +1,5 @@
-let createModulePromise;
+import createModule from "./wasm-zstd.js";
+
 let modulePromise;
 let moduleInstance;
 
@@ -49,18 +50,12 @@ function normalizeInitOptions(options = {}) {
   return moduleOptions;
 }
 
-async function loadCreateModule() {
-  createModulePromise ??= import("./wasm-zstd.js").then((mod) => mod.default);
-  return await createModulePromise;
-}
-
 export async function init(options = {}) {
   if (moduleInstance != undefined) {
     return;
   }
 
   const moduleOptions = normalizeInitOptions(options);
-  const createModule = await loadCreateModule();
 
   modulePromise ??= createModule(moduleOptions).then((mod) => {
     moduleInstance = mod;

@@ -43,8 +43,11 @@ builds because Vite owns the `.wasm` asset URL.
 
 ## Usage in inline workers (`?worker&inline`)
 
-Vite inline workers are loaded from `blob:` URLs, so sibling `.wasm` files cannot be resolved
-from `import.meta.url`. Fetch the wasm bytes on the main thread and pass them into the worker:
+Vite inline workers are loaded from `blob:` URLs, so neither sibling `.wasm` files nor sibling
+JS chunks can be resolved relative to the worker. To keep inline workers self-contained, the
+Emscripten glue is imported **statically** (not via a runtime `import("./wasm-zstd.js")`), so
+bundlers inline it into the worker chunk. You only need to supply the wasm **bytes** — fetch
+them on the main thread and pass them into the worker:
 
 ```ts
 // main thread
